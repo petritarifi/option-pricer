@@ -1,10 +1,11 @@
 import numpy as np
 from scipy.stats import norm
-def d1_d2(S0, K, r, T, vol):
+from scipy.optimize import brentq
+def d1_d2(S0, K, r, T, vol, q):
     """Compute d1 and d2 for the Black-Scholes-Merton formula."""
-    d1 = (np.log(S0/K) + (r + 0.5 *vol**2)*T)/(vol * np.sqrt(T))
+    d1 = (np.log(S0/K) + (r - q + 0.5*vol**2)*T)/(vol * np.sqrt(T))
     d2 = d1 - vol*np.sqrt(T)
-    return (d1,d2)
+    return (d1, d2)
 
 
 def bsm_price(S0, K, r, T, vol, q, option_type):
@@ -33,7 +34,7 @@ def bsm_price(S0, K, r, T, vol, q, option_type):
     float
         Price of the option.
     """
-    d1, d2 = d1_d2(S0, K, r, T, vol)
+    d1, d2 = d1_d2(S0, K, r, T, vol, q)
     if option_type == "call":
         return S0 * np.exp(-q * T) * norm.cdf(d1) - K* np.exp(-r*T) * norm.cdf(d2)
     elif option_type == "put":
@@ -52,7 +53,7 @@ def bsm_greeks(S0, K, r, T, vol, q, option_type):
         theta : dPrice/dT
         rho   : dPrice/dr
     """
-    d1, d2 = d1_d2(S0, K, r, T, vol)
+    d1, d2 = d1_d2(S0, K, r, T, vol, q)
     pdf_d1 = norm.pdf(d1)
 
     gamma = (np.exp(-q*T) * pdf_d1) / (S0 * vol * np.sqrt(T))
@@ -78,3 +79,67 @@ def bsm_greeks(S0, K, r, T, vol, q, option_type):
         raise ValueError(f"option_type has to be 'call' or 'put', received : {option_type}")
 
     return {"delta": delta, "gamma": gamma, "vega": vega, "theta": theta, "rho": rho}
+
+def implied_vol(price, S0, K, r, T, q, option_type,
+                 vol_lower=1e-6, vol_upper=5.0, tol=1e-8, max_iter=100):
+    """
+    Implied volatility that reprices a European option to a given market price.
+
+    Solves bsm_price(S0, K, r, T, vol, q, option_type) = price for vol using
+    Brent's method.
+
+    Parameters
+    ----------
+    price : float
+        Observed market price of the option.
+    S0 : float
+        Current spot price of the underlying.
+    K : float
+        Strike price.
+    r : float
+        Continuously compounded risk-free rate.
+    T : float
+        Time to maturity, in years.
+    q : float
+        Continuous dividend yield.
+    option_type : str
+        "call" or "put".
+    vol_lower : float, optional
+        Lower bound of the volatility search bracket.
+    vol_upper : float, optional
+        Upper bound of the volatility search bracket.
+    tol : float, optional
+        Absolute tolerance on the price residual passed to Brent's method.
+    max_iter : int, optional
+        Maximum number of Brent iterations.
+
+    Returns
+    -------
+    float
+        Implied volatility.
+
+    Raises
+    ------
+    ValueError
+        If option_type is invalid, or if price is outside the no-arbitrage
+        bounds implied by S0, K, r, T, q.
+    """
+    if option_type == "call":
+        lower_bound = max(S0 * np.exp(-q*T) - K * np.exp(-r*T), 0.0)
+        upper_bound = S0 * np.exp(-q*T)
+    elif option_type == "put":
+        lower_bound = max(K * np.exp(-r*T) - S0 * np.exp(-q*T), 0.0)
+        upper_bound = K * np.exp(-r*T)
+    else:
+        raise ValueError(f"option_type has to be 'call' or 'put', received: {option_type}")
+
+    if not (lower_bound < price < upper_bound):
+        raise ValueError(
+            f"price {price} is outside the no-arbitrage bounds "
+            f"({lower_bound:.6f}, {upper_bound:.6f}) for the given S0, K, r, T, q"
+        )
+
+    def objective(vol):
+        return bsm_price(S0, K, r, T, vol, q, option_type) - price
+
+    return brentq(objective, vol_lower, vol_upper, xtol=tol, maxiter=max_iter)

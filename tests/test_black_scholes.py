@@ -7,8 +7,10 @@ from optionpricer.models.black_scholes import bsm_price
 
 from optionpricer.models.black_scholes import bsm_greeks
 
+from optionpricer.models.black_scholes import implied_vol
+
 def test_d1_d2_known_values():
-    d1, d2 = d1_d2(S0=100, K=100, r=0.02, T=1, vol=0.2)
+    d1, d2 = d1_d2(S0=100, K=100, r=0.02, T=1, vol=0.2, q=0.0)
     assert d1 == pytest.approx(0.20, abs=1e-3)
     assert d2 == pytest.approx(0.00, abs=1e-3)
 
@@ -29,3 +31,15 @@ def test_delta_matches_finite_difference():
 
     analytic_delta = bsm_greeks(S0, K, r, T, vol, q, "call")["delta"]
     assert numeric_delta == pytest.approx(analytic_delta, abs=1e-3)
+
+def test_implied_vol_round_trip():
+    S0, K, r, T, q, option_type = 100, 110, 0.03, 1.0, 0.01, "call"
+    true_vol = 0.27
+    price = bsm_price(S0, K, r, T, true_vol, q, option_type)
+    recovered_vol = implied_vol(price, S0, K, r, T, q, option_type)
+    assert recovered_vol == pytest.approx(true_vol, abs=1e-6)
+
+def test_implied_vol_out_of_bounds_raises():
+    S0, K, r, T, q, option_type = 100, 100, 0.02, 1.0, 0.0, "call"
+    with pytest.raises(ValueError):
+        implied_vol(price=200, S0=S0, K=K, r=r, T=T, q=q, option_type=option_type)
